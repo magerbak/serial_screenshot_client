@@ -210,7 +210,15 @@ bool ScreenshotClient::sendCommand(const char* cmd, size_t len)
 
 bool ScreenshotClient::parseHeader(const uint8_t* data)
 {
-    if (data[0] != 'V' && data[1] != VERSION) {
+    if (data[0] == 'X') {
+        fprintf(stderr, "Server error\n");
+        return false;
+    }
+    if (data[0] != 'V') {
+        fprintf(stderr, "Server not ready\n");
+        return false;
+    }
+    if (data[1] != VERSION) {
         fprintf(stderr, "Unsupported version (%d)\n", data[1]);
         return false;
     }
