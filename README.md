@@ -6,7 +6,9 @@ Other output formats could be trivially added by using the appropriate STB conve
 
 # Protocol
 
-The embedded device needs to be running server logic that waits for a screenshot command, and then responds with a short header followed by the raw RGB bitmap. The transfer is slow - a 320x240 image takes about 10s even at 921600bps - but 
+The embedded device needs to be running server logic that waits for a screenshot command, and then responds with a short header followed by the raw RGB bitmap. See the example tft_server implementation in this repository.
+
+The transfer is slow - a 320x240 image takes about 10s even at 921600bps - but 
 I have found it to be reliable enough without any checksum or retransmit logic. For performance reasons there is no handshaking - it is expected that the Linux client can keep up with whatever rate the embedded device can transmit at.
 
 ## Sequence Diagram 
