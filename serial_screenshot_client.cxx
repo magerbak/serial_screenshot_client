@@ -234,9 +234,10 @@ int main(int argc, char** argv)
     ScreenshotClient ss;
 
     if (argc != 3) {
-        printf("Arduino screen capture client. v1.0\n");
-        printf("Requires a sketch running TFTServer on device\n");
-        printf("Usage: %s <dev> <filename>\n", argv[0]);
+        printf("Serial screen capture client. v1.0\n");
+        printf("See example TFTServer implementation to run on embedded device\n");
+        printf("Usage: %s <serialdev> <filename>\n", argv[0]);
+        printf("\nFor example: %s /dev/ttyACM0 screenshot.png\n", argv[0]);
         return 255;
     }
 
