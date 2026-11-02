@@ -114,7 +114,7 @@ void TFTServer::setTimeout(uint32_t timeout)
 
 bool TFTServer::checkTimeout() const
 {
-    return (millis() - m_start < m_timeout);
+    return (millis() - m_start >= m_timeout);
 }
 
 bool TFTServer::screenshot()

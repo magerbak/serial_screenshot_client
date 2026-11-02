@@ -22,6 +22,7 @@ public:
 private:
     static constexpr uint8_t VERSION = 1;
     static constexpr size_t HDR_LEN = 11;
+    static constexpr int RESPONSE_TIMEOUT_SECS = 10;
     enum State {
         STATE_INIT,
         STATE_ECHO,
@@ -31,6 +32,7 @@ private:
         STATE_COMPLETE,
     };
     bool openSerial(const char* dev, unsigned int baudrate);
+    bool waitForInput();
     bool sendCommand(const char* cmd, size_t len);
     bool parseHeader(const uint8_t* data);
 
@@ -66,6 +68,7 @@ bool ScreenshotClient::capture(const char* dev, const char* filename)
     int rc = 0;
     int n;
     static unsigned int count = 0;
+    time_t now;
 
     if (!openSerial(dev, /* 115200 */ 921600)) {
         return false;
@@ -81,66 +84,84 @@ bool ScreenshotClient::capture(const char* dev, const char* filename)
             }
             else {
                 offset = 0;
+                m_start = time(nullptr);
                 m_state = STATE_HDR;
             }
             break;
         case STATE_ECHO:
-            rc = read(m_dev, &data[0], 1);
-            if (rc < 0 && errno != EAGAIN) {
-                fprintf(stderr, "Error reading\n");
-                ok = false;
-                break;
-            }
-            else if (rc > 0) {
-                putchar(data[0]);
+            // For debug
+            if (waitForInput()) {
+                rc = read(m_dev, &data[0], 1);
+                if (rc < 0) {
+                    fprintf(stderr, "Error reading\n");
+                    ok = false;
+                    break;
+                }
+                else if (rc > 0) {
+                    putchar(data[0]);
+                }
             }
             break;
         case STATE_HDR:
             // Header is 11 bytes long:
             // V1WxxHxxYxD
-            rc = read(m_dev, &data[offset], HDR_LEN - offset);
-            if (rc < 0 && errno != EAGAIN) {
-                fprintf(stderr, "Error reading header\n");
-                ok = false;
-                break;
-            }
-            else if (rc > 0) {
-                offset += rc;
-                if (offset == HDR_LEN) {
-                    if (!parseHeader(data)) {
-                        ok = false;
-                        break;
-                    }
-                    printf("Receiving image %dx%d\n", m_width, m_height);
-                    offset = 0;
-                    m_start = time(nullptr);
-                    m_state = STATE_IMG;
+            now = time(nullptr);
+            if (waitForInput()) {
+                rc = read(m_dev, &data[offset], HDR_LEN - offset);
+                if (rc < 0) {
+                    fprintf(stderr, "Error reading header\n");
+                    ok = false;
+                    break;
                 }
+                else if (rc > 0) {
+                    offset += rc;
+                    if (offset == HDR_LEN) {
+                        if (!parseHeader(data)) {
+                            ok = false;
+                            break;
+                        }
+                        printf("Receiving image %dx%d\n", m_width, m_height);
+                        offset = 0;
+                        m_start = time(nullptr);
+                        m_state = STATE_IMG;
+                    }
+                }
+            }
+            else if (now - m_start > RESPONSE_TIMEOUT_SECS) {
+                printf("Timeout\n");
+                ok = false;
             }
             break;
         case STATE_IMG:
-            n = m_width * m_height * 3 - m_offset;
-            rc = read(m_dev, &m_image[m_offset], n);
-            if (rc < 0 && errno != EAGAIN) {
-                fprintf(stderr, "Error reading header\n");
-                ok = false;
-                break;
-            }
-            else if (rc > 0) {
-                m_offset += rc;
-                count++;
-                if (count % 32 == 0) {
-                    printf(".");
-                    if (count > 7680 / 8) {
-                        printf(" %d bytes\n", m_offset);
-                        count = 0;
+            now = time(nullptr);
+            if (waitForInput()) {
+                n = m_width * m_height * 3 - m_offset;
+                rc = read(m_dev, &m_image[m_offset], n);
+                if (rc < 0) {
+                    fprintf(stderr, "Error reading header\n");
+                    ok = false;
+                    break;
+                }
+                else if (rc > 0) {
+                    m_offset += rc;
+                    count++;
+                    if (count % 32 == 0) {
+                        printf(".");
+                        if (count > 7680 / 8) {
+                            printf(" %d bytes\n", m_offset);
+                            count = 0;
+                        }
+                        fflush(stdout);
                     }
-                    fflush(stdout);
+                    if (m_offset == m_width * m_height * 3) {
+                        printf(" %d bytes\n", m_offset);
+                        m_state = STATE_PROCESSING;
+                    }
                 }
-                if (m_offset == m_width * m_height * 3) {
-                    printf(" %d bytes\n", m_offset);
-                    m_state = STATE_PROCESSING;
-                }
+            }
+            else if (now - m_start > RESPONSE_TIMEOUT_SECS) {
+                printf("Timeout\n");
+                ok = false;
             }
             break;
         case STATE_PROCESSING:
@@ -172,7 +193,7 @@ bool ScreenshotClient::openSerial(const char* dev, unsigned int baudrate)
 {
     // Open serial port using baudrate and 8N1.
     struct termios attr;
-    m_dev = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    m_dev = open(dev, O_RDWR | O_NOCTTY);
     if (m_dev < 0) {
         fprintf(stderr, "Error opening input device (%s)\n", strerror(errno));
         return false;
@@ -201,6 +222,29 @@ bool ScreenshotClient::openSerial(const char* dev, unsigned int baudrate)
     tcflush(m_dev, TCIFLUSH);
     return true;
 }
+
+bool ScreenshotClient::waitForInput()
+{
+    fd_set fds;
+    struct timeval timeout;
+    FD_ZERO(&fds);
+
+    FD_SET(m_dev, &fds);
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+
+    int rc = select(m_dev + 1, &fds, nullptr, nullptr, &timeout);
+    if (rc > 0) {
+        if (FD_ISSET(m_dev, &fds)) {
+            return true;
+        }
+    }
+    else if (rc < 0) {
+        return true;
+    }
+    return false;
+}
+
 
 bool ScreenshotClient::sendCommand(const char* cmd, size_t len)
 {
